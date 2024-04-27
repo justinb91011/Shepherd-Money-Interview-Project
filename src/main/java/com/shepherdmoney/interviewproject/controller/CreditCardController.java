@@ -9,11 +9,10 @@ import com.shepherdmoney.interviewproject.vo.request.UpdateBalancePayload;
 import com.shepherdmoney.interviewproject.vo.response.CreditCardView;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
-import java.util.stream.Collectors;
+import java.util.NavigableMap;
+
 
 
 @RestController
@@ -26,7 +25,7 @@ public class CreditCardController {
     public ResponseEntity<Integer> addCreditCardToUser(@RequestBody AddCreditCardToUserPayload payload) {
         User user = userRepository.findById(payload.getUserId()).orElse(null);
         if (user == null) {
-            return ResponseEntity.badRequest().body(400);
+            return ResponseEntity.badRequest().body(null);
         }
         CreditCard newCreditCard = new CreditCard();
         newCreditCard.setIssuanceBank(payload.getCardIssuanceBank());
@@ -54,26 +53,38 @@ public class CreditCardController {
 
     @GetMapping("/credit-card:user-id")
     public ResponseEntity<Integer> getUserIdForCreditCard(@RequestParam String creditCardNumber) {
-        CreditCard card = creditCardRepository
-        // TODO: Given a credit card number, efficiently find whether there is a user associated with the credit card
-        //       If so, return the user id in a 200 OK response. If no such user exists, return 400 Bad Request
-        return null;
+        CreditCard card = creditCardRepository.findByNumber(creditCardNumber);
+        if (card != null && card.getUser() != null) {
+            // If the card exists and it has a user. Return the userId
+            return ResponseEntity.ok(card.getUser().getId());
+        }
+        return ResponseEntity.badRequest().body(null);
     }
 
     @PostMapping("/credit-card:update-balance")
-    public SomeEnityData postMethodName(@RequestBody UpdateBalancePayload[] payload) {
-        //TODO: Given a list of transactions, update credit cards' balance history.
-        //      1. For the balance history in the credit card
-        //      2. If there are gaps between two balance dates, fill the empty date with the balance of the previous date
-        //      3. Given the payload `payload`, calculate the balance different between the payload and the actual balance stored in the database
-        //      4. If the different is not 0, update all the following budget with the difference
-        //      For example: if today is 4/12, a credit card's balanceHistory is [{date: 4/12, balance: 110}, {date: 4/10, balance: 100}],
-        //      Given a balance amount of {date: 4/11, amount: 110}, the new balanceHistory is
-        //      [{date: 4/12, balance: 120}, {date: 4/11, balance: 110}, {date: 4/10, balance: 100}]
-        //      Return 200 OK if update is done and successful, 400 Bad Request if the given card number
-        //        is not associated with a card.
-        
-        return null;
+    public ResponseEntity<String> postMethodName(@RequestBody UpdateBalancePayload[] payload) {
+        for (UpdateBalancePayload payloads: payload) {
+            CreditCard card = creditCardRepository.findByNumber(payloads.getCreditCardNumber());
+            if (card == null) {
+                return ResponseEntity.badRequest().body("Credit card number " + payloads.getCreditCardNumber() + " not found");
+            }
+            // Call function to update the Balance
+            updateBalanceHistory(card.getBalanceHistory(), payloads);
+        }
+        return ResponseEntity.ok("Balances updated successfully.");
     }
-    
+
+    private void updateBalanceHistory(NavigableMap<String, Double> balanceHistory, UpdateBalancePayload payload) {
+        String payloadDate = payload.getBalanceDate().toString();
+        String floorKey = balanceHistory.floorKey(payloadDate);
+        if (floorKey == null || !floorKey.equals(payloadDate)) {
+            // If there is no exact match, and the date is not in the map, insert with the same balance as the closest previous date
+            double previousBalance = (floorKey == null) ? 0 : balanceHistory.get(floorKey);
+            balanceHistory.put(payloadDate, previousBalance + payload.getBalanceAmount());
+        } else {
+            // If there's an exact match, update the balance
+            balanceHistory.put(payloadDate, balanceHistory.get(payloadDate) + payload.getBalanceAmount());
+        }
+        balanceHistory.tailMap(payloadDate, false).replaceAll((date, balance) -> balance + payload.getBalanceAmount());
+    }
 }
